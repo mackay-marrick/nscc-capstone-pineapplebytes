@@ -1,0 +1,15 @@
+.env# Security / Secrets
+.env
+
+# Python / Flask
+__pycache__/
+venv/
+env/
+*.pyc
+
+# Next.js / Node
+pineapplebytes_nscc_capstone/node_modules/
+pineapplebytes_nscc_capstone/.next/
+pineapplebytes_nscc_capstone/out/
+pineapplebytes_nscc_capstone/build/
+.DS_Store
