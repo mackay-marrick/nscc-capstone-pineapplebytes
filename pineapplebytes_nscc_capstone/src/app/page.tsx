@@ -89,6 +89,12 @@ export default function Home() {
 
   useEffect(() => {
     const fetchRestaurantData = async () => {
+      // Guard: Don't fetch if we don't have an ID yet
+      if (!activeCompanyId) {
+        setIsLoading(false)
+        return
+      }
+      
       const companyIdNum = parseInt(activeCompanyId, 10)
       
       if (isNaN(companyIdNum) || companyIdNum <= 0) {
@@ -102,7 +108,9 @@ export default function Home() {
       setRestaurant(null)
 
       try {
-        const response = await fetch(`http://127.0.0.1:5000/api/company/${companyIdNum}/summary`)
+        // Use environment variable for API URL, fallback to localhost for development
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000';
+        const response = await fetch(`${apiUrl}/api/company/${companyIdNum}/summary`)
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}))
           if (response.status === 404) {
