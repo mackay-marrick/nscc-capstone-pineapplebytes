@@ -1,4 +1,8 @@
-.env# Security / Secrets
+# ============================================================================
+# PineappleBytes Project - Git Ignore
+# ============================================================================
+
+# Security / Secrets
 .env
 
 # Python / Flask
@@ -6,10 +10,25 @@ __pycache__/
 venv/
 env/
 *.pyc
+.pytest_cache/
 
 # Next.js / Node
 pineapplebytes_nscc_capstone/node_modules/
 pineapplebytes_nscc_capstone/.next/
 pineapplebytes_nscc_capstone/out/
 pineapplebytes_nscc_capstone/build/
+
+# OS / IDE
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache directories
+cache/

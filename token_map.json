@@ -1,1 +1,10 @@
-{}
+{
+  "[CLIENT_NAME_1]": {
+    "first_name": "Sherry",
+    "last_name": "Buck"
+  },
+  "[CLIENT_PHONE_1]": {
+    "phone_number": "+1-288-657-9499",
+    "extension": "384"
+  }
+}
