@@ -6,6 +6,8 @@ This script:
 1. Connects to master database
 2. Creates PineappleBytes database if it doesn't exist
 3. Deploys schema and sample data directly
+
+Supports both direct RDS connection and SSH tunnel connection.
 """
 
 import os
@@ -82,7 +84,6 @@ CREATE INDEX idx_resource_name ON resource(resource_name);
 -- ============================================================================
 CREATE TABLE contact (
     contact_id INT PRIMARY KEY,
-    company_id INT,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
     phone_number VARCHAR(50),
@@ -90,14 +91,12 @@ CREATE TABLE contact (
     title VARCHAR(100),
     relationship VARCHAR(50),
     contact_type VARCHAR(50),
-    email VARCHAR(255),
-    FOREIGN KEY (company_id) REFERENCES company(company_id)
+    email VARCHAR(255)
 );
 
 CREATE INDEX idx_contact_name ON contact(last_name, first_name);
 CREATE INDEX idx_contact_email ON contact(email);
 CREATE INDEX idx_contact_type ON contact(contact_type);
-CREATE INDEX idx_contact_company_id ON contact(company_id);
 
 -- ============================================================================
 -- Table: configuration
@@ -122,28 +121,24 @@ CREATE INDEX idx_config_tag ON configuration(tag_number);
 -- ============================================================================
 CREATE TABLE agreement (
     agreement_id INT PRIMARY KEY,
-    company_id INT,
     agreement_type VARCHAR(50) NOT NULL,
     agreement_name VARCHAR(500) NOT NULL,
     amount DECIMAL(10,2),
     billing_cycle INT,
     date_start DATE,
     date_end DATE,
-    status VARCHAR(50),
-    FOREIGN KEY (company_id) REFERENCES company(company_id)
+    status VARCHAR(50)
 );
 
 CREATE INDEX idx_agreement_type ON agreement(agreement_type);
 CREATE INDEX idx_agreement_status ON agreement(status);
 CREATE INDEX idx_agreement_dates ON agreement(date_start, date_end);
-CREATE INDEX idx_agreement_company_id ON agreement(company_id);
 
 -- ============================================================================
 -- Table: ticket
 -- ============================================================================
 CREATE TABLE ticket (
     ticket_id INT PRIMARY KEY,
-    company_id INT,
     total_hours DECIMAL(5,2),
     age DECIMAL(5,1),
     status VARCHAR(50),
@@ -155,8 +150,7 @@ CREATE TABLE ticket (
     subtype VARCHAR(50),
     item VARCHAR(50),
     date_entered DATE,
-    team_name VARCHAR(200),
-    FOREIGN KEY (company_id) REFERENCES company(company_id)
+    team_name VARCHAR(200)
 );
 
 CREATE INDEX idx_ticket_status ON ticket(status);
@@ -164,7 +158,6 @@ CREATE INDEX idx_ticket_priority ON ticket(priority);
 CREATE INDEX idx_ticket_type ON ticket(ticket_type);
 CREATE INDEX idx_ticket_team ON ticket(team_name);
 CREATE INDEX idx_ticket_date ON ticket(date_entered);
-CREATE INDEX idx_ticket_company_id ON ticket(company_id);
 
 -- ============================================================================
 -- Table: ticket_note
@@ -237,23 +230,67 @@ def sanitize_db_name(db_name: str) -> str:
     return db_name
 
 
-def build_connection_string():
-    """Build connection string to PineappleBytes database"""
+def build_connection_string(master: bool = False):
+    """
+    Build ODBC connection string from environment variables.
+    
+    Supports two configurations:
+    1. SSH Tunnel (local port forwarding):
+       - DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+       - Connects to localhost via tunnel
+    2. Direct connection:
+       - DB_SERVER, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+       - Connects directly to RDS
+    
+    Args:
+        master: If True, connect to master database (for CREATE DATABASE)
+        
+    Returns:
+        ODBC connection string for SQL Server
+    """
+    # Check for SSH tunnel configuration first (preferred if both exist)
+    db_host = os.getenv('DB_HOST')
+    db_port = os.getenv('DB_PORT')
+    db_user = os.getenv('DB_USER')
+    db_pass = os.getenv('DB_PASS')
+    db_name = os.getenv('DB_NAME')
+    
+    if db_host and db_port and db_user and db_pass and db_name:
+        # Using SSH tunnel - connect to localhost via forwarded port
+        logger.info(f"Using SSH tunnel configuration: {db_host}:{db_port}")
+        database = 'master' if master else db_name
+        conn_str = (
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"SERVER={db_host},{db_port};"
+            f"DATABASE={database};"
+            f"UID={db_user};"
+            f"PWD={db_pass};"
+            f"TrustServerCertificate=yes;"
+            f"Connection Timeout=30;"
+        )
+        return conn_str
+    
+    # Fall back to direct RDS connection
     server = os.getenv('DB_SERVER')
-    database = os.getenv('DB_DATABASE', 'PineappleBytes')
+    database = 'master' if master else os.getenv('DB_DATABASE', 'PineappleBytes')
     username = os.getenv('DB_USERNAME')
     password = os.getenv('DB_PASSWORD')
     
-    if not server or not username or not password:
+    if not server:
         raise ValueError(
-            "DB_SERVER, DB_USERNAME, and DB_PASSWORD must be set in .env file"
+            "DB_SERVER environment variable not set. "
+            "Please configure your .env file with the RDS endpoint "
+            "or use SSH tunnel variables (DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME)."
         )
     
-    # Sanitize database name for safety
-    database = sanitize_db_name(database)
+    if not username or not password:
+        raise ValueError(
+            "DB_USERNAME and DB_PASSWORD must be set in .env file. "
+            "SQL Server authentication is required for RDS."
+        )
     
-    return (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+    conn_str = (
+        f"DRIVER={{ODBC Driver 18 for SQL Server}};"
         f"SERVER={server};"
         f"DATABASE={database};"
         f"UID={username};"
@@ -262,29 +299,9 @@ def build_connection_string():
         f"TrustServerCertificate=yes;"
         f"Connection Timeout=30;"
     )
-
-
-def build_master_connection_string():
-    """Build connection string to master database"""
-    server = os.getenv('DB_SERVER')
-    username = os.getenv('DB_USERNAME')
-    password = os.getenv('DB_PASSWORD')
     
-    if not server or not username or not password:
-        raise ValueError(
-            "DB_SERVER, DB_USERNAME, and DB_PASSWORD must be set in .env file"
-        )
-    
-    return (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-        f"SERVER={server};"
-        f"DATABASE=master;"
-        f"UID={username};"
-        f"PWD={password};"
-        f"Encrypt=yes;"
-        f"TrustServerCertificate=yes;"
-        f"Connection Timeout=30;"
-    )
+    logger.info(f"Built direct connection string for server: {server}, database: {database}")
+    return conn_str
 
 
 def database_exists(cursor, db_name):
@@ -300,14 +317,19 @@ def create_database():
     """Create PineappleBytes database if it doesn't exist"""
     db_name = os.getenv('DB_DATABASE', 'PineappleBytes')
     
-    print(f"Connecting to master database on server: {os.getenv('DB_SERVER')}")
+    # If using SSH tunnel, prefer DB_NAME
+    db_name_ssh = os.getenv('DB_NAME')
+    if db_name_ssh:
+        db_name = db_name_ssh
+    
+    print(f"Connecting to master database on server: {os.getenv('DB_SERVER', 'via tunnel')}")
     
     try:
         # Sanitize database name
         db_name = sanitize_db_name(db_name)
         
         # Connect to master with autocommit for CREATE DATABASE
-        conn = pyodbc.connect(build_master_connection_string(), autocommit=True)
+        conn = pyodbc.connect(build_connection_string(master=True), autocommit=True)
         cursor = conn.cursor()
         
         print("Connection to master established.")
@@ -435,9 +457,15 @@ def deploy_schema_and_data():
     logger.info("="*60)
     
     try:
+        # Get database name for connection
+        db_name = os.getenv('DB_DATABASE', 'PineappleBytes')
+        db_name_ssh = os.getenv('DB_NAME')
+        if db_name_ssh:
+            db_name = db_name_ssh
+        
         # Connect to PineappleBytes database
-        conn_str = build_connection_string()
-        logger.info(f"Connecting to database: {os.getenv('DB_DATABASE')}")
+        conn_str = build_connection_string(master=False)
+        logger.info(f"Connecting to database: {db_name}")
         conn = pyodbc.connect(conn_str)
         logger.info("Connected successfully.")
         

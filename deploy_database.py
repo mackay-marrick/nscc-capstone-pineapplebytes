@@ -14,10 +14,10 @@ Workflow:
 Prerequisites:
 - Database 'PineappleBites' must already exist on the RDS instance
 - Connection details configured in .env file:
-  * DB_SERVER (RDS endpoint)
-  * DB_DATABASE (database name)
-  * DB_USERNAME (username)
-  * DB_PASSWORD (password)
+  * DB_SERVER (RDS endpoint) OR DB_HOST/DB_PORT for SSH tunnel
+  * DB_DATABASE (database name) OR DB_NAME for SSH tunnel
+  * DB_USERNAME (username) OR DB_USER for SSH tunnel
+  * DB_PASSWORD (password) OR DB_PASS for SSH tunnel
 - Required packages: pyodbc, python-dotenv
 
 Usage:
@@ -233,15 +233,39 @@ class DatabaseDeployer:
         """
         Build ODBC connection string from environment variables.
         
-        Expected .env variables:
-        - DB_SERVER: RDS endpoint (e.g., 'pineapplebites.123456789012.us-east-1.rds.amazonaws.com\\SQLEXPRESS,14333')
-        - DB_DATABASE: Database name (e.g., 'PineappleBites')
-        - DB_USERNAME: Username for authentication
-        - DB_PASSWORD: Password for authentication
+        Supports two configurations:
+        1. SSH Tunnel (local port forwarding):
+           - DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+           - Connects to localhost via tunnel
+        2. Direct connection:
+           - DB_SERVER, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+           - Connects directly to RDS
         
         Returns:
             ODBC connection string for SQL Server
         """
+        # Check for SSH tunnel configuration first (preferred if both exist)
+        db_host = os.getenv('DB_HOST')
+        db_port = os.getenv('DB_PORT')
+        db_user = os.getenv('DB_USER')
+        db_pass = os.getenv('DB_PASS')
+        db_name = os.getenv('DB_NAME')
+        
+        if db_host and db_port and db_user and db_pass and db_name:
+            # Using SSH tunnel - connect to localhost via forwarded port
+            logger.info(f"Using SSH tunnel configuration: {db_host}:{db_port}")
+            conn_str = (
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                f"SERVER={db_host},{db_port};"
+                f"DATABASE={db_name};"
+                f"UID={db_user};"
+                f"PWD={db_pass};"
+                f"TrustServerCertificate=yes;"
+                f"Connection Timeout=30;"
+            )
+            return conn_str
+        
+        # Fall back to direct RDS connection
         server = os.getenv('DB_SERVER')
         database = os.getenv('DB_DATABASE', 'PineappleBites')
         username = os.getenv('DB_USERNAME')
@@ -250,7 +274,8 @@ class DatabaseDeployer:
         if not server:
             raise ValueError(
                 "DB_SERVER environment variable not set. "
-                "Please configure your .env file with the RDS endpoint."
+                "Please configure your .env file with the RDS endpoint "
+                "or use SSH tunnel variables (DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME)."
             )
         
         if not username or not password:
@@ -259,10 +284,8 @@ class DatabaseDeployer:
                 "SQL Server authentication is required for RDS."
             )
         
-        # For RDS with custom port, the port is already in the server string (host\instance,port)
-        # We add TrustServerCertificate=yes to bypass SSL validation in dev
         conn_str = (
-            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
             f"SERVER={server};"
             f"DATABASE={database};"
             f"UID={username};"
@@ -272,15 +295,15 @@ class DatabaseDeployer:
             f"Connection Timeout=30;"
         )
         
-        logger.info(f"Built connection string for RDS server: {server}, database: {database}")
+        logger.info(f"Built direct connection string for RDS server: {server}, database: {database}")
         return conn_str
     
     def connect(self) -> None:
         """Establish connection to the RDS database"""
         try:
-            logger.info("Connecting to AWS RDS SQL Server...")
+            logger.info("Connecting to database...")
             self.connection = pyodbc.connect(self.connection_string)
-            logger.info("Successfully connected to RDS database")
+            logger.info("Successfully connected to database")
         except pyodbc.Error as e:
             error_msg = f"Failed to connect to database: {str(e)}"
             logger.error(error_msg)
@@ -293,81 +316,6 @@ class DatabaseDeployer:
             self.connection.close()
             self.connection = None
             logger.info("Database connection closed")
-    
-    def execute_sql_file(self, filepath: str, description: str) -> Tuple[bool, List[str]]:
-        """
-        Execute all SQL statements from a file.
-        
-        Args:
-            filepath: Path to the SQL file
-            description: Description for logging (e.g., "schema", "data")
-            
-        Returns:
-            Tuple of (success_flag, list_of_errors)
-        """
-        errors = []
-        
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                sql_content = f.read()
-            
-            # Split on GO statements (SQL Server batch separator)
-            # This handles both Unix and Windows line endings
-            sql_commands = []
-            current_command = []
-            
-            for line in sql_content.splitlines():
-                stripped = line.strip()
-                if stripped.upper() == 'GO':
-                    if current_command:
-                        sql_commands.append('\n'.join(current_command))
-                        current_command = []
-                else:
-                    current_command.append(line)
-            
-            # Add the last command if exists
-            if current_command:
-                sql_commands.append('\n'.join(current_command))
-            
-            # Filter out empty commands and comments
-            sql_commands = [
-                cmd for cmd in sql_commands 
-                if cmd.strip() and not cmd.strip().startswith('--')
-            ]
-            
-            logger.info(f"Parsed {len(sql_commands)} SQL commands from {filepath}")
-            
-            # Execute each command
-            cursor = self.connection.cursor()
-            for i, command in enumerate(sql_commands, 1):
-                try:
-                    cursor.execute(command)
-                    # For INSERT statements, track row count
-                    if command.strip().upper().startswith('INSERT'):
-                        self.stats['rows_inserted'] += cursor.rowcount
-                    cursor.commit()
-                except pyodbc.Error as e:
-                    error_msg = f"Command {i} failed: {str(e)[:200]}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
-                    # Continue with next command (best effort)
-                    continue
-            
-            cursor.close()
-            
-            if not errors:
-                logger.info(f"Successfully executed {description} from {filepath}")
-            
-            return len(errors) == 0, errors
-            
-        except FileNotFoundError:
-            error_msg = f"File not found: {filepath}"
-            logger.error(error_msg)
-            return False, [error_msg]
-        except Exception as e:
-            error_msg = f"Unexpected error reading {filepath}: {str(e)}"
-            logger.error(error_msg)
-            return False, [error_msg]
     
     def execute_schema(self, schema_sql: str) -> bool:
         """
@@ -542,7 +490,7 @@ class DatabaseDeployer:
             True if deployment successful, False otherwise
         """
         logger.info("="*60)
-        logger.info("STARTING DATABASE DEPLOYMENT TO AWS RDS")
+        logger.info("STARTING DATABASE DEPLOYMENT")
         logger.info("="*60)
         
         try:

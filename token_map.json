@@ -1,1 +1,18 @@
-{}
+{
+  "[CLIENT_NAME_1]": {
+    "first_name": "Perry",
+    "last_name": "Le"
+  },
+  "[CLIENT_PHONE_1]": {
+    "phone_number": "861-962-8183x1521",
+    "extension": "755"
+  },
+  "[CLIENT_NAME_2]": {
+    "first_name": "Scott",
+    "last_name": "Brennan"
+  },
+  "[CLIENT_PHONE_2]": {
+    "phone_number": "+1-468-505-6322",
+    "extension": "255"
+  }
+}

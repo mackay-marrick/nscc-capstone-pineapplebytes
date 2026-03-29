@@ -10,19 +10,26 @@ Workflow:
 2. Tokenization: Mask PII fields (names, phone numbers) with tokens
 3. Payload Preparation: Format masked data into clean JSON structure
 4. OpenRouter Integration: Send to LLM for summarization
+
+Offline Mode:
+If network connectivity is lost (e.g., school network blocking AWS RDS/OpenRouter),
+the middleware can fall back to cached data from previous successful runs.
 """
 
 import os
 import sys
 import json
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 
 # Third-party libraries (install via pip: pyodbc python-dotenv openai)
 import pyodbc
 from dotenv import load_dotenv
 from openai import OpenAI
+
+# Import cache manager
+from cache_manager import CacheManager
 
 # Load environment variables from .env file
 load_dotenv()
@@ -78,15 +85,38 @@ class DatabaseExtractor:
         """
         Construct ODBC connection string from environment variables.
         
-        Expected .env variables:
-        - DB_SERVER: SQL Server host (e.g., 'localhost\\SQLEXPRESS')
-        - DB_DATABASE: Database name
-        - DB_USERNAME: Username for authentication
-        - DB_PASSWORD: Password for authentication
+        Supports two configurations:
+        1. SSH Tunnel (local port forwarding):
+           - DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+           - Connects to localhost via tunnel
+        2. Direct connection:
+           - DB_SERVER, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+           - Connects directly to RDS
         
         Returns:
             ODBC connection string for SQL Server
         """
+        # Check for SSH tunnel configuration first (preferred if both exist)
+        db_host = os.getenv('DB_HOST')
+        db_port = os.getenv('DB_PORT')
+        db_user = os.getenv('DB_USER')
+        db_pass = os.getenv('DB_PASS')
+        db_name = os.getenv('DB_NAME')
+        
+        if db_host and db_port and db_user and db_pass and db_name:
+            # Using SSH tunnel - connect to localhost via forwarded port
+            logger.info(f"Using SSH tunnel configuration: {db_host}:{db_port}")
+            conn_str = (
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                f"SERVER={db_host},{db_port};"
+                f"DATABASE={db_name};"
+                f"UID={db_user};"
+                f"PWD={db_pass};"
+                f"TrustServerCertificate=yes;"
+            )
+            return conn_str
+        
+        # Fall back to direct RDS connection
         server = os.getenv('DB_SERVER', 'localhost\\SQLEXPRESS')
         database = os.getenv('DB_DATABASE', 'PineappleBytes')
         username = os.getenv('DB_USERNAME', '')
@@ -95,7 +125,7 @@ class DatabaseExtractor:
         if username and password:
             # SQL Server Authentication
             conn_str = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                 f"SERVER={server};"
                 f"DATABASE={database};"
                 f"UID={username};"
@@ -105,20 +135,21 @@ class DatabaseExtractor:
         else:
             # Windows Authentication
             conn_str = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                 f"SERVER={server};"
                 f"DATABASE={database};"
                 f"Trusted_Connection=yes;"
                 f"TrustServerCertificate=yes;"
             )
         
-        logger.info(f"Built connection string for server: {server}, database: {database}")
+        logger.info(f"Built direct connection string for server: {server}, database: {database}")
         return conn_str
     
     def connect(self) -> None:
         """Establish database connection"""
         try:
-            self.connection = pyodbc.connect(self.connection_string)
+            # Set timeout for connection (30 seconds)
+            self.connection = pyodbc.connect(self.connection_string, timeout=30)
             logger.info("Successfully connected to SQL Server database")
         except pyodbc.Error as e:
             logger.error(f"Failed to connect to database: {e}")
@@ -679,21 +710,26 @@ class OpenRouterClient:
         # Specify the model as requested
         self.model = "stepfun/step-3.5-flash:free"
         
+        # Token usage tracking
+        self.total_tokens_used = 0
+        self.api_calls_count = 0
+        
         logger.info(f"OpenRouter client initialized with model: {self.model}")
     
-    def generate_summary(self, payload: Dict[str, Any], system_prompt: str = None) -> str:
+    def generate_summary(self, payload: Dict[str, Any], system_prompt: str = None, timeout: int = 60) -> str:
         """
         Send payload to OpenRouter LLM and receive a summary.
         
         Args:
             payload: The prepared JSON payload containing client data
             system_prompt: Optional custom system prompt. If None, uses default.
+            timeout: Timeout in seconds for the API call (default: 60)
             
         Returns:
             LLM-generated summary text
             
         Raises:
-            Exception: If API call fails
+            Exception: If API call fails or times out
         """
         if system_prompt is None:
             system_prompt = (
@@ -705,7 +741,11 @@ class OpenRouterClient:
         user_content = json.dumps(payload, indent=2)
         
         try:
-            logger.info(f"Sending request to OpenRouter API (model: {self.model})")
+            logger.info(f"Sending request to OpenRouter API (model: {self.model}, timeout: {timeout}s)")
+            
+            # Set timeout for the request using OpenAI client's timeout parameter
+            import httpx
+            timeout_config = httpx.Timeout(timeout)
             
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -720,13 +760,26 @@ class OpenRouterClient:
                     }
                 ],
                 temperature=0.7,  # Balanced creativity
-                max_tokens=2000   # Increased from 1000, lower than default to avoid reserving too many tokens
+                max_tokens=2000,  # Increased from 1000, lower than default to avoid reserving too many tokens
+                timeout=timeout_config,
+                extra_headers={
+                    "HTTP-Referer": "https://github.com/mackay-marrick/nscc-capstone-pineapplebytes",
+                    "X-Title": "PineappleBytes Middleware"
+                }
             )
             
-            # Extract the summary text
+            # Extract the summary text and track token usage
             if response.choices and len(response.choices) > 0:
                 summary = response.choices[0].message.content
                 logger.info(f"Received summary response: {len(summary)} characters")
+                
+                # Track token usage if available in response
+                if hasattr(response, 'usage') and response.usage:
+                    tokens_used = response.usage.total_tokens
+                    self.total_tokens_used += tokens_used
+                    self.api_calls_count += 1
+                    logger.info(f"API call used {tokens_used} tokens. Total this session: {self.total_tokens_used}")
+                
                 return summary
             else:
                 logger.warning("Empty response received from API")
@@ -735,6 +788,19 @@ class OpenRouterClient:
         except Exception as e:
             logger.error(f"OpenRouter API request failed: {e}")
             raise
+    
+    def get_token_usage(self) -> Dict[str, int]:
+        """Get token usage statistics for this client instance"""
+        return {
+            'total_tokens': self.total_tokens_used,
+            'api_calls': self.api_calls_count
+        }
+    
+    def reset_token_usage(self) -> None:
+        """Reset token usage counters"""
+        self.total_tokens_used = 0
+        self.api_calls_count = 0
+        logger.info("Token usage counters reset")
 
 
 # ============================================================================
@@ -752,24 +818,31 @@ class MiddlewareEngine:
     4. Send to OpenRouter LLM
     5. Return summary
     
+    Offline Mode:
+    If network connectivity fails, the engine can fall back to cached data
+    from previous successful runs (if available).
+    
     Usage:
         engine = MiddlewareEngine()
         summary = engine.process_company(company_id=26)
     """
     
-    def __init__(self, db_connection_string: str = None):
+    def __init__(self, db_connection_string: str = None, enable_cache: bool = True):
         """
         Initialize middleware engine with optional database connection string.
         
         Args:
             db_connection_string: Optional custom ODBC connection string
+            enable_cache: Whether to enable offline cache fallback (default: True)
         """
         self.extractor = DatabaseExtractor(db_connection_string)
         self.tokenizer = DataTokenizer()
         self.payload_preparer = PayloadPreparer()
         self.api_client = OpenRouterClient()
+        self.cache_manager = CacheManager() if enable_cache else None
+        self.offline_mode_used = False
     
-    def process_company(self, company_id: int, save_token_map: bool = True) -> str:
+    def process_company(self, company_id: int, save_token_map: bool = True, force_offline: bool = False) -> str:
         """
         Complete end-to-end processing for a single company.
         
@@ -780,15 +853,19 @@ class MiddlewareEngine:
         4. Send to OpenRouter LLM
         5. Return the generated summary
         
+        If network connectivity fails and cache is enabled, it will attempt to
+        load cached data and summary from a previous successful run.
+        
         Args:
             company_id: The company ID to process
             save_token_map: Whether to save token mapping file (default: True)
+            force_offline: If True, skip live database/API calls and use cache only
             
         Returns:
             LLM-generated summary string
             
         Raises:
-            Various exceptions from underlying components
+            Various exceptions from underlying components if cache unavailable
         """
         # Validate company_id input
         if not isinstance(company_id, int):
@@ -797,6 +874,23 @@ class MiddlewareEngine:
             raise ValueError(f"company_id must be a positive integer, got {company_id}")
         
         logger.info(f"Starting middleware processing for company_id: {company_id}")
+        
+        # Check if we should use offline mode
+        if force_offline and self.cache_manager:
+            logger.info("Force offline mode enabled - using cached data only")
+            cached_data = self.cache_manager.load_from_cache(company_id)
+            if cached_data:
+                self.offline_mode_used = True
+                logger.info("Successfully loaded data from cache (offline mode)")
+                return cached_data['summary']
+            else:
+                raise ValueError(f"No cached data available for company {company_id}. Cannot run in offline mode.")
+        
+        # Check cache first as fallback (only if cache exists)
+        if self.cache_manager:
+            cached_data = self.cache_manager.load_from_cache(company_id)
+            if cached_data:
+                logger.info(f"Found cached data for company {company_id} - will use if live processing fails")
         
         try:
             # STEP 1: Extract data from database (separate queries)
@@ -823,12 +917,28 @@ class MiddlewareEngine:
             logger.info("\n=== STEP 4: OpenRouter Integration ===")
             summary = self.api_client.generate_summary(payload)
             
+            # Save successful result to cache for future offline use
+            if self.cache_manager:
+                try:
+                    self.cache_manager.save_to_cache(company_id, sanitized_data, summary)
+                    logger.info("Saved processing result to cache for future offline use")
+                except Exception as e:
+                    logger.warning(f"Failed to save to cache: {e}")
+            
             logger.info(f"\n=== PROCESSING COMPLETE ===\nGenerated Summary:\n{summary}")
             
             return summary
             
         except Exception as e:
             logger.error(f"Middleware processing failed: {e}")
+            
+            # If cache is available, fall back to offline mode
+            if self.cache_manager and cached_data:
+                logger.warning("Live processing failed, falling back to cached data (offline mode)")
+                self.offline_mode_used = True
+                return cached_data['summary']
+            
+            # No cache available, re-raise exception
             raise
     
     def cleanup(self):
@@ -854,7 +964,7 @@ if __name__ == "__main__":
        - DB_PASSWORD=your_pass (if using SQL auth)
        - OPENROUTER_API_KEY=your_key
        
-    2. Run: python middleware_engine.py --company-id 26
+   2. Run: python middleware_engine.py --company-id 26
     """
     import argparse
     
