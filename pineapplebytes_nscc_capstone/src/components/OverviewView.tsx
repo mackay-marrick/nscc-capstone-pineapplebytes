@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ﻿'use client'
+=======
+'use client'
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 
 import { Download, FileText, RotateCw, MapPin, User, Tag } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'

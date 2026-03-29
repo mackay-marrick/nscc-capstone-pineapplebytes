@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ﻿export interface SystemTicket {
+=======
+export interface SystemTicket {
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
   system: string;
   openTickets: number;
   resolved: number;
@@ -134,7 +138,11 @@ export const mockRestaurants: Restaurant[] = [
     
     executiveSummary: 'Despite current performance at The Grill House - Halifax, servers within acceptable thresholds, longer-period trending shows slower service times during peak dinner hours.',
     
+<<<<<<< HEAD
     networkInfrastructureNotes: 'The primary network has identified nine recent occurrence events (detailed network disruption events) over the POS router and location gateway. While all outages (Γëñ 60s) on the network timeline are concerning past the threshold, specifically once the failure point.',
+=======
+    networkInfrastructureNotes: 'The primary network has identified nine recent occurrence events (detailed network disruption events) over the POS router and location gateway. While all outages (≤ 60s) on the network timeline are concerning past the threshold, specifically once the failure point.',
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
     
     hardwareDegradation: 'We have observed a trend in the thermal printing of the front-of-house terminals. Terminal 03 is showing signs of hardware aging, specifically low capacity issues with buffering to the required peak performance.',
     
@@ -337,4 +345,8 @@ export const mockRestaurants: Restaurant[] = [
     systemUptime: 94.3,
     caseResponseVerified: false,
   },
+<<<<<<< HEAD
 ];
+=======
+];
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49

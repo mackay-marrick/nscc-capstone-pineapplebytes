@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ﻿'use client'
+=======
+'use client'
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 
 import { useState, useEffect } from 'react'
 import { RestaurantHeader } from '@/components/RestaurantHeader'
@@ -89,6 +93,15 @@ export default function Home() {
 
   useEffect(() => {
     const fetchRestaurantData = async () => {
+<<<<<<< HEAD
+=======
+      // Guard: Don't fetch if we don't have an ID yet
+      if (!activeCompanyId) {
+        setIsLoading(false)
+        return
+      }
+      
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
       const companyIdNum = parseInt(activeCompanyId, 10)
       
       if (isNaN(companyIdNum) || companyIdNum <= 0) {
@@ -102,7 +115,13 @@ export default function Home() {
       setRestaurant(null)
 
       try {
+<<<<<<< HEAD
         const response = await fetch(`http://127.0.0.1:5000/api/company/${companyIdNum}/summary`)
+=======
+        // Use environment variable for API URL, fallback to localhost for development
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000';
+        const response = await fetch(`${apiUrl}/api/company/${companyIdNum}/summary`)
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}))
           if (response.status === 404) {
@@ -228,4 +247,8 @@ export default function Home() {
       )}
     </div>
   )
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49

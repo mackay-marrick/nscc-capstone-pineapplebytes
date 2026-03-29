@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ﻿This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+=======
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 
 ## Getting Started
 

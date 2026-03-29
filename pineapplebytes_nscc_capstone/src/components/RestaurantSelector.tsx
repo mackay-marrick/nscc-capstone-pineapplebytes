@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ﻿'use client'
+=======
+'use client'
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 
 import { ChevronDown } from 'lucide-react'
 import { Restaurant } from '@/data/restaurantData'

@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+<<<<<<< HEAD
+=======
+**/node_modules/
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 /.pnp
 .pnp.*
 .yarn/*
@@ -9,14 +13,26 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+<<<<<<< HEAD
+=======
+__pycache__/
+venv/
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 
 # testing
 /coverage
 
 # next.js
 /.next/
+<<<<<<< HEAD
 /out/
 
+=======
+**/.next/
+/out/
+
+
+>>>>>>> e46fdbbaf44880c2cb0f4e0fb06bafc7d464da49
 # production
 /build
 
